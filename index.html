@@ -53,7 +53,7 @@
     <div class="topbar">
       <div>
         <h1>Dashboard Público de Certificaciones</h1>
-        <div class="subtitle">Conectado en forma fija a Google Sheets</div>
+        <div class="subtitle">Conectado en forma fija a Google Sheets · Estado tomado desde la columna ESTADO</div>
       </div>
       <div class="status" id="estadoConexion">Conectando a la base pública…</div>
     </div>
@@ -66,7 +66,7 @@
           <div><label for="fCargo">Cargo</label><select id="fCargo"><option value="">Todos</option></select></div>
           <div><label for="fEstado">Estado</label><select id="fEstado"><option value="">Todos</option></select></div>
           <div><label for="fResultado">Resultado</label><select id="fResultado"><option value="">Todos</option></select></div>
-          <div><label for="fContrato">Contrato</label><select id="fContrato"><option value="">Todos</option></select></div>
+          <div><label for="fContrato">Contrato</label><select id="fContrato"><option value="">Todos</option></select></div><div><label for="fTipoContrato">Tipo Contrato</label><select id="fTipoContrato"><option value="">Todos</option></select></div>
           <div><label for="fTexto">Nombre o RUT</label><input id="fTexto" type="text" placeholder="Buscar..." /></div>
         </div>
         <div class="actions">
@@ -78,8 +78,8 @@
       </div>
 
       <div class="card kpi"><div class="card-title">Registros filtrados</div><div class="kpi-value" id="kpiRegistros">0</div><div class="kpi-note">Cantidad total de filas visibles</div></div>
-      <div class="card kpi"><div class="card-title">Certificaciones cobrables</div><div class="kpi-value" id="kpiCert">0</div><div class="kpi-note">Aprobados × $180.000</div></div>
-      <div class="card kpi"><div class="card-title">Costo total</div><div class="kpi-value" id="kpiCosto">$0</div><div class="kpi-note">Valor estimado sobre aprobados</div></div>
+      <div class="card kpi"><div class="card-title">Certificaciones cobrables</div><div class="kpi-value" id="kpiCert">0</div><div class="kpi-note">Todos los registros × $180.000</div></div>
+      <div class="card kpi"><div class="card-title">Costo total</div><div class="kpi-value" id="kpiCosto">$0</div><div class="kpi-note">Valor total considerando todos los registros</div></div>
       <div class="card kpi"><div class="card-title">Equipos distintos</div><div class="kpi-value" id="kpiEquipos">0</div><div class="kpi-note">Sobre la vista actual</div></div>
 
       <div class="card chart6"><div class="card-title">Certificaciones por equipo</div><div class="chart-box"><canvas id="chartEquipo"></canvas></div></div>
@@ -118,21 +118,38 @@ function adaptarFila(row){
   const kRut = findKey(row, ["rut candidato","rut","r.u.t"]);
   const kCargo = findKey(row, ["cargo","perfil"]);
   const kEquipo = findKey(row, ["modelo","equipo","maquina"]);
-  const kContrato = findKey(row, ["contrato","faena"]);
+  const kContrato = findKey(row, ["contrato","faena"]); const kTipoContrato = findKey(row, ["tipo contrato","tipo_contrato","tipo"]);
   const kEstado = findKey(row, ["estado"]);
   const kResultado = findKey(row, ["resultado","resultado final"]);
   const kFecha = findKey(row, ["fecha informe","fecha","fecha prot","fecha pct"]);
 
   const item = {
     nombre: normalizarTexto(row[kNombre]), rut: normalizarTexto(row[kRut]), cargo: normalizarTexto(row[kCargo]),
-    equipo: normalizarTexto(row[kEquipo]), contrato: normalizarTexto(row[kContrato]), estado: normalizarTexto(row[kEstado]),
+    equipo: normalizarTexto(row[kEquipo]), contrato: normalizarTexto(row[kContrato]), tipoContrato: normalizarTexto(row[kTipoContrato]), estado: normalizarTexto(row[kEstado]),
     resultado: normalizarTexto(row[kResultado]), fecha: normalizarTexto(row[kFecha]),
   };
 
   const resultadoNorm = norm(item.resultado), estadoNorm = norm(item.estado);
-  const esAprobado = resultadoNorm.includes("acredit") || resultadoNorm.includes("aprob") || estadoNorm.includes("aprob");
-  item.costo = esAprobado ? VALOR_CERTIFICADO : 0;
-  item.estadoGrupo = esAprobado ? "Aprobado" : ((resultadoNorm.includes("pend") || estadoNorm.includes("pend")) ? "Pendiente" : "Otros");
+
+  // El filtro de ESTADO debe respetar exactamente la planilla:
+  // APROBADO / PENDIENTE / Otros.
+  if (estadoNorm.includes("aprob")) item.estadoGrupo = "Aprobado";
+  else if (estadoNorm.includes("pend")) item.estadoGrupo = "Pendiente";
+  else item.estadoGrupo = item.estado ? item.estado : "Otros";
+
+  // TODOS los registros se consideran cobrados (Aprobado, Pendiente y Otros)
+  const esCobrable = true;
+  item.costo = esCobrable ? VALOR_CERTIFICADO : 0;
+
+  // Se conserva el resultado original por separado.
+  item.resultadoGrupo = resultadoNorm.includes("acredit")
+    ? "Acreditado"
+    : (resultadoNorm.includes("suficiente")
+        ? "Suficiente"
+        : (resultadoNorm.includes("insuficiente")
+            ? "Insuficiente"
+            : (resultadoNorm.includes("no acredit") ? "No Acreditado" : item.resultado)));
+
   return item;
 }
 async function cargarDatos(){
@@ -163,12 +180,12 @@ function llenarFiltros(){
   llenarSelect("fCargo", valoresUnicos(base, "cargo"));
   llenarSelect("fEstado", valoresUnicos(base, "estadoGrupo"));
   llenarSelect("fResultado", valoresUnicos(base, "resultado"));
-  llenarSelect("fContrato", valoresUnicos(base, "contrato"));
+  llenarSelect("fContrato", valoresUnicos(base, "contrato"));  llenarSelect("fTipoContrato", valoresUnicos(base, "tipoContrato"));
 }
 function aplicarFiltros(){
   const fEquipo = document.getElementById("fEquipo").value, fCargo = document.getElementById("fCargo").value, fEstado = document.getElementById("fEstado").value;
-  const fResultado = document.getElementById("fResultado").value, fContrato = document.getElementById("fContrato").value, fTexto = document.getElementById("fTexto").value.trim().toLowerCase();
-  vista = base.filter(x => (!fEquipo || x.equipo === fEquipo) && (!fCargo || x.cargo === fCargo) && (!fEstado || x.estadoGrupo === fEstado) && (!fResultado || x.resultado === fResultado) && (!fContrato || x.contrato === fContrato) && (!fTexto || (x.nombre + " " + x.rut).toLowerCase().includes(fTexto)));
+  const fResultado = document.getElementById("fResultado").value, fContrato = document.getElementById("fContrato").value, fTipoContrato = document.getElementById("fTipoContrato").value, fTexto = document.getElementById("fTexto").value.trim().toLowerCase();
+  vista = base.filter(x => (!fEquipo || x.equipo === fEquipo) && (!fCargo || x.cargo === fCargo) && (!fEstado || x.estadoGrupo === fEstado) && (!fResultado || x.resultado === fResultado) && (!fContrato || x.contrato === fContrato) && (!fTipoContrato || x.tipoContrato === fTipoContrato) && (!fTexto || (x.nombre + " " + x.rut).toLowerCase().includes(fTexto)));
   renderKPIs(); renderTabla(); renderCharts();
 }
 function limpiarFiltros(){ ["fEquipo","fCargo","fEstado","fResultado","fContrato","fTexto"].forEach(id => document.getElementById(id).value = ""); aplicarFiltros(); }
@@ -246,7 +263,7 @@ function exportarCSV(){
 }
 function escapeHtml(text){ return String(text ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;"); }
 document.addEventListener("DOMContentLoaded", () => {
-  ["fEquipo","fCargo","fEstado","fResultado","fContrato"].forEach(id => document.getElementById(id).addEventListener("change", aplicarFiltros));
+  ["fEquipo","fCargo","fEstado","fResultado","fContrato","fTipoContrato"].forEach(id => document.getElementById(id).addEventListener("change", aplicarFiltros));
   document.getElementById("fTexto").addEventListener("input", aplicarFiltros);
   cargarDatos();
 });
